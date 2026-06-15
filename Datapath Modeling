@@ -1,0 +1,93 @@
+`timescale 1ns/1ps
+
+module BOOTH (ldA, ldQ, ldM, clrA, clrQ, clrff, sftA, sftQ,
+              addsub, decr, ldcnt, data_in, clk, qml, eqz);
+
+    input  ldA, ldQ, ldM, clrA, clrQ, clrff, sftA, sftQ, addsub, clk;
+    input  decr, ldcnt;              
+    input  [15:0] data_in;
+    output qml, eqz;
+
+    wire [15:0] A, M, Q, Z;
+    wire [4:0]  cnt;                 
+
+    assign eqz = |cnt;             
+
+    shiftreg AR (.data_out(A), .data_in(Z),       .s_in(A[15]),
+                 .clk(clk), .ld(ldA), .clr(clrA), .sft(sftA));
+
+    shiftreg QR (.data_out(Q), .data_in(data_in), .s_in(A[0]),
+                 .clk(clk), .ld(ldQ), .clr(clrQ),  .sft(sftQ));
+
+    diff QM1 (.d(Q[0]), .q(qml), .clk(clk), .clr(clrff), .en(sftQ));
+
+    PIPO MR (.data_in(data_in), .data_out(M), .clk(clk), .ld(ldM));
+
+    ALU  AS (.out(Z), .in1(A), .in2(M), .addsub(addsub));
+
+    counter CNT (.data_out(cnt), .decr(decr), .ldcnt(ldcnt), .clk(clk));
+
+endmodule
+
+
+// ── Arithmetic shift register ────────────────────────────────
+module shiftreg (data_out, data_in, s_in, clk, ld, clr, sft);
+    input        s_in, clk, ld, clr, sft;
+    input  [15:0] data_in;
+    output reg [15:0] data_out;
+
+    always @(posedge clk) begin
+        if      (clr) data_out <= 16'b0;
+        else if (ld)  data_out <= data_in;
+        else if (sft) data_out <= {s_in, data_out[15:1]};  // arithmetic right-shift
+    end
+endmodule
+
+
+// ── Parallel-in Parallel-out register ───────────────────────
+module PIPO (data_in, data_out, clk, ld);
+    input        clk, ld;
+    input  [15:0] data_in;
+    output reg [15:0] data_out;
+
+    always @(posedge clk) begin
+        if (ld) data_out <= data_in;
+    end
+endmodule
+
+
+// ── D flip-flop with synchronous clear and clock enable ──────
+module diff (d, q, clk, clr, en);
+    input  d, clk, clr, en;
+    output reg q;
+
+    always @(posedge clk) begin
+        if      (clr) q <= 1'b0;
+        else if (en)  q <= d;
+    end
+endmodule
+
+
+// ── 16-bit ALU ───────────────────────────────────────────────
+module ALU (out, in1, in2, addsub);
+    input        addsub;
+    input  [15:0] in1, in2;
+    output reg [15:0] out;
+
+    always @(*) begin
+        if (addsub == 1'b0) out = in1 + in2;
+        else                out = in1 - in2;
+    end
+endmodule
+
+
+// ── 5-bit counter (loads 16, decrements) ────────────────────
+module counter (data_out, decr, ldcnt, clk);
+    input        decr, ldcnt, clk;
+    output reg [4:0] data_out;
+
+    always @(posedge clk) begin
+        if      (ldcnt) data_out <= 5'b10000;
+        else if (decr)  data_out <= data_out - 1'b1;
+    end
+endmodule
