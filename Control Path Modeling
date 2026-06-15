@@ -1,0 +1,87 @@
+module controller (ldA, clrA, sftA, ldQ, clrQ, sftQ, ldM, clrff,
+                   addsub, decr, ldcnt, done,
+                   clk, rst_n, start, q0, qml, eqz);
+
+    input  clk, rst_n, start, q0, qml, eqz;
+    output reg ldA, clrA, sftA, ldQ, clrQ, sftQ, ldM, clrff;
+    output reg addsub, decr, ldcnt, done;
+
+    reg [2:0] state;
+
+    parameter S0  = 3'b000,   // idle
+              S1  = 3'b001,   // init  (clrA, clrff, ldcnt, ldM)
+              S2  = 3'b010,   // load Q
+              S2B = 3'b011,   // check {q0,qml}  (Q / shift result now stable)
+              S3  = 3'b100,   // subtract  A ← A − M
+              S4  = 3'b101,   // add       A ← A + M
+              S5  = 3'b110,   // shift right + decrement counter
+              S6  = 3'b111;   // done
+
+    // ── Sequential: next-state ───────────────────────────────
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n)
+            state <= S0;
+        else case (state)
+            S0:  if (start)         state <= S1;
+            S1:                     state <= S2;
+            S2:                     state <= S2B;  // Q loads at this edge; check next
+            S2B: begin
+                     if      (!eqz)                   state <= S6;  // count done
+                     else if ({q0,qml} == 2'b10)      state <= S3;  // q0=1,qml=0 → sub
+                     else if ({q0,qml} == 2'b01)      state <= S4;  // q0=0,qml=1 → add
+                     else                             state <= S5;  // no-op → shift
+                 end
+            S3:                     state <= S5;   // subtract → shift
+            S4:                     state <= S5;   // add → shift
+            S5:                     state <= S2B;  // shift → check again
+            S6:                     state <= S6;   // stay done
+            default:                state <= S0;
+        endcase
+    end
+
+    // ── Combinational: output logic ──────────────────────────
+    always @(*) begin
+        // Safe defaults – deassert everything
+        clrA   = 1'b0; ldA  = 1'b0; sftA  = 1'b0;
+        clrQ   = 1'b0; ldQ  = 1'b0; sftQ  = 1'b0;
+        ldM    = 1'b0; clrff = 1'b0;
+        addsub = 1'b0; decr  = 1'b0; ldcnt = 1'b0;
+        done   = 1'b0;
+
+        case (state)
+            S0:  ; // all deasserted
+
+            S1:  begin  // FIX 1 vs original: fully specified
+                     clrA  = 1'b1; clrff = 1'b1;
+                     ldcnt = 1'b1; ldM   = 1'b1;
+                 end
+
+            S2:  begin  // load Q (multiplier)
+                     ldQ   = 1'b1;
+                 end
+
+            S2B: ; // check state – no register writes
+
+            S3:  begin  // A ← A − M  (q0=1, qml=0)
+                     ldA    = 1'b1;
+                     addsub = 1'b1;  // subtract
+                 end
+
+            S4:  begin  // A ← A + M  (q0=0, qml=1)
+                     ldA    = 1'b1;
+                     addsub = 1'b0;  // add
+                 end
+
+            S5:  begin  // arithmetic right-shift {A,Q} by 1, decrement counter
+                     sftA  = 1'b1; sftQ  = 1'b1; decr = 1'b1;
+                 end
+
+            S6:  done  = 1'b1;
+
+            default: begin  // FIX 12: was referencing undefined 'clr'
+                     clrA  = 1'b1; clrQ  = 1'b1; clrff = 1'b1;
+                 end
+        endcase
+    end
+
+endmodule
